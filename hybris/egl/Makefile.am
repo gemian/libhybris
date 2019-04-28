@@ -36,7 +36,7 @@ libEGL_la_LDFLAGS = \
 	-ldl \
 	$(top_builddir)/common/libhybris-common.la \
 	$(top_builddir)/hardware/libhardware.la \
-	-version-info "1":"0":"0"
+	-version-info "1":"1":"0"
 
 eglincludedir = $(includedir)/EGL
 eglinclude_HEADERS = \
