@@ -18,4 +18,4 @@ libGLESv2_la_CFLAGS += -ggdb -O0
 endif
 libGLESv2_la_LDFLAGS = \
 	$(top_builddir)/common/libhybris-common.la \
-	-version-info "2":"1":"0"
+	-version-info "2":"0":"1"
