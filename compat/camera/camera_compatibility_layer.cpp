@@ -315,27 +315,31 @@ void android_camera_enumerate_supported_flash_modes(CameraControl* control, flas
 	assert(control);
 
 	android::Mutex::Autolock al(control->guard);
-	android::String8 raw_modes;
-	raw_modes = android::String8(
+	const char *raw_modes =
 			control->camera_parameters.get(
-				android::CameraParameters::KEY_SUPPORTED_FLASH_MODES));
+				android::CameraParameters::KEY_SUPPORTED_FLASH_MODES);
 
-	const char delimiter[2] = ",";
+	if (raw_modes == NULL) {
+		return;
+	}
+
+	const char delimiter[] = ",";
 	char *token;
 	android::String8 mode;
-	char *raw_modes_mutable = strdup(raw_modes.string());
+	char *raw_modes_mutable = strdup(raw_modes);
+
+	ALOGD("Supported flash modes: %s", raw_modes);
 
 	token = strtok(raw_modes_mutable, delimiter);
 
 	while (token != NULL) {
-		uint32_t index = flash_modes_lut.indexOfKey(mode);
-
 		mode = android::String8(token);
 		if (flash_modes_lut.indexOfKey(mode) >= 0) {
 			cb(ctx, flash_modes_lut.valueFor(mode));
 		}
 		token = strtok(NULL, delimiter);
 	}
+	free(raw_modes_mutable);
 }
 
 void android_camera_set_white_balance_mode(CameraControl* control, WhiteBalanceMode mode)
@@ -400,6 +404,7 @@ void android_camera_enumerate_supported_scene_modes(CameraControl* control, scen
 		cb(ctx, scene_modes_lut.valueFor(mode));
 		token = strtok(NULL, delimiter);
 	}
+	free(raw_modes_mutable);
 }
 
 void android_camera_get_scene_mode(CameraControl* control, SceneMode* mode)
@@ -615,6 +620,7 @@ void android_camera_enumerate_supported_thumbnail_sizes(struct CameraControl* co
 		// Get the next <width>x<height> pair
 		token = strtok_r(NULL, delimiter, &save_ptr);
 	}
+	free(sizes_mutable);
 }
 
 void android_camera_set_picture_size(CameraControl* control, int width, int height)
