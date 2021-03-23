@@ -4,7 +4,7 @@ Maintainer: TheKit <nekit1000@gmail.com>
 Build-Depends: debhelper (>= 9.0.0),
                autotools-dev,
                dh-autoreconf,
-               android-headers (>= 4.4.2),
+               android-headers,
                quilt,
                pkg-config,
                libgles2-mesa-dev,
@@ -48,7 +48,7 @@ Package: libmedia-dev
 Section: libdevel
 Architecture: armhf arm64 i386 amd64
 Depends: libmedia1 (= ${binary:Version}),
-         android-headers (>= 4.4.2),
+         android-headers,
          ${misc:Depends}
 Description: Development files for libmedia
  Contains the development files for the Android Media HAL, which
@@ -73,7 +73,7 @@ Package: libhardware-dev
 Section: libdevel
 Architecture: armhf arm64 i386 amd64
 Depends: libhardware2 (= ${binary:Version}),
-         android-headers (>= 4.4.2),
+         android-headers,
          ${misc:Depends}
 Description: Development files for libhardware
  Contains the development files for the Android libhardware HAL, which can
@@ -122,7 +122,7 @@ Package: libhybris-dev
 Section: libdevel
 Architecture: armhf arm64 i386 amd64
 Depends: libhybris (= ${binary:Version}),
-         android-headers (>= 4.4.2),
+         android-headers,
          libandroid-properties-dev (= ${binary:Version}),
          libhardware-dev (= ${binary:Version}),
          libmedia-dev (= ${binary:Version}),
