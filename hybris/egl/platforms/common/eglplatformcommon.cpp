@@ -50,6 +50,7 @@ extern "C" void hybris_dump_buffer_to_file(ANativeWindowBuffer *buf)
 	static int cnt = 0;
 	void *vaddr;
 	int ret = hybris_gralloc_lock(buf->handle, buf->usage, 0, 0, buf->width, buf->height, &vaddr);
+	(void)ret;
 	TRACE("buf:%p gralloc lock returns %i", buf, ret);
 	TRACE("buf:%p lock to vaddr %p", buf, vaddr);
 	char b[1024];
@@ -67,8 +68,8 @@ extern "C" void hybris_dump_buffer_to_file(ANativeWindowBuffer *buf)
 	int fd = ::open(b, O_WRONLY|O_CREAT, S_IRWXU);
 	if(fd < 0)
 		return;
-
-	::write(fd, vaddr, buf->stride * buf->height * bytes_pp);
+	if (::write(fd, vaddr, buf->stride * buf->height * bytes_pp) < 0)
+		TRACE("dump buffer to file failed with error %i", errno);
 	::close(fd);
 	hybris_gralloc_unlock(buf->handle);
 }
@@ -188,7 +189,7 @@ extern "C" EGLBoolean eglplatformcommon_eglHybrisCreateNativeBuffer(EGLint width
 	buffer_handle_t _handle;
 	int _stride;
 
-	hybris_gralloc_allocate(width, height, format, usage, &_handle, (uint32_t*)&_stride);
+	ret = hybris_gralloc_allocate(width, height, format, usage, &_handle, (uint32_t*)&_stride);
 
 	if (ret == 0)
 	{
@@ -283,11 +284,11 @@ extern "C" __eglMustCastToProperFunctionPointerType eglplatformcommon_eglGetProc
 		return (__eglMustCastToProperFunctionPointerType)eglplatformcommon_eglQueryWaylandBufferWL;
 	}
 	else
-    if (strcmp(procname, "eglHybrisAcquireNativeBufferWL") == 0)
-    {
-        return (__eglMustCastToProperFunctionPointerType) eglplatformcommon_eglHybrisAcquireNativeBufferWL;
-    }
-    else
+	if (strcmp(procname, "eglHybrisAcquireNativeBufferWL") == 0)
+	{
+		return (__eglMustCastToProperFunctionPointerType) eglplatformcommon_eglHybrisAcquireNativeBufferWL;
+	}
+	else
 #endif
 	if (strcmp(procname, "eglHybrisCreateNativeBuffer") == 0)
 	{
@@ -337,14 +338,8 @@ extern "C" const char *eglplatformcommon_eglQueryString(EGLDisplay dpy, EGLint n
 	if (name == EGL_EXTENSIONS)
 	{
 		const char *ret = (*real_eglQueryString)(dpy, name);
-		static char eglextensionsbuf[1024];
-		snprintf(eglextensionsbuf, 1022, "%sEGL_HYBRIS_native_buffer2 EGL_HYBRIS_WL_acquire_native_buffer %s", ret ? ret : "",
-#ifdef WANT_WAYLAND
-			"EGL_WL_bind_wayland_display "
-#else
-			""
-#endif
-		);
+		static char eglextensionsbuf[2048];
+		snprintf(eglextensionsbuf, 2046, "%sEGL_HYBRIS_native_buffer2 EGL_HYBRIS_WL_acquire_native_buffer EGL_WL_bind_wayland_display", ret ? ret : "");
 		ret = eglextensionsbuf;
 		return ret;
 	}

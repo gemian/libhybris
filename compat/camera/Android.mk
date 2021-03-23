@@ -1,6 +1,12 @@
 LOCAL_PATH:= $(call my-dir)
 
-HYBRIS_MEDIA_32_BIT_ONLY := $(shell cat frameworks/av/media/libmediaplayerservice/Android.mk |grep LOCAL_32_BIT_ONLY |grep -o "true\|false")
+ifneq (,$(wildcard frameworks/av/media/mediaserver/Android.mk))
+HYBRIS_MEDIA_32_BIT_ONLY := $(shell cat frameworks/av/media/mediaserver/Android.mk | grep LOCAL_32_BIT_ONLY | grep -o "true\|false")
+else
+ifneq (,$(wildcard frameworks/av/media/mediaserver/Android.bp))
+HYBRIS_MEDIA_32_BIT_ONLY := $(shell cat frameworks/av/media/mediaserver/Android.bp | grep compile_multilib | grep -wo "32" | sed "s/32/true/")
+endif
+endif
 
 ifeq ($(HYBRIS_MEDIA_32_BIT_ONLY),true)
 HYBRIS_MEDIA_MULTILIB := 32
@@ -52,9 +58,8 @@ endif
 LOCAL_C_INCLUDES := \
 	$(HYBRIS_PATH)/include \
 	bionic \
-	bionic/libstdc++/include \
+	external/libcxx/include \
 	external/gtest/include \
-	external/stlport/stlport \
 	external/skia/include/core \
 
 LOCAL_SHARED_LIBRARIES := \

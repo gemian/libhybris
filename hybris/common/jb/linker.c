@@ -51,6 +51,10 @@
 #include "linker_environ.h"
 #include "linker_format.h"
 
+#ifdef WANT_ARM_TRACING
+#include "../wrappers.h"
+#endif
+
 #define ALLOW_SYMBOLS_FROM_MAIN 1
 #define SO_MAX 128
 
@@ -80,6 +84,10 @@
  * - allocate space for soinfo structs dynamically instead of
  *   having a hard limit (64)
 */
+
+#ifdef WANT_ARM_TRACING
+void *(*_create_wrapper)(const char *symbol, void *function, int wrapper_type);
+#endif
 
 static void* (*_get_hooked_symbol)(const char *symbol, const char *requester);
 
@@ -1373,14 +1381,27 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
         if(sym != 0) {
             sym_name = (char *)(strtab + symtab[sym].st_name);
             INFO("HYBRIS: '%s' checking hooks for sym '%s'\n", si->name, sym_name);
-            sym_addr = _get_hooked_symbol(sym_name, si->name);
-            if (sym_addr != NULL) {
+            sym_addr = (unsigned)_get_hooked_symbol(sym_name, si->name);
+            if (sym_addr != 0) {
                 INFO("HYBRIS: '%s' hooked symbol %s to %x\n", si->name,
                                                   sym_name, sym_addr);
+#ifdef WANT_ARM_TRACING
+                s = _do_lookup(si, sym_name, &base);
+                if(s != NULL) {
+                    switch(ELF32_ST_TYPE(s->st_info))
+                    {
+                       case STT_FUNC:
+                       case STT_GNU_IFUNC:
+                       case STT_ARM_TFUNC:
+                         sym_addr = (unsigned)_create_wrapper(sym_name, (void*)sym_addr, WRAPPER_HOOKED);
+                         break;
+                    }
+                }
+#endif
             } else {
-               s = _do_lookup(si, sym_name, &base);
+                s = _do_lookup(si, sym_name, &base);
             }
-            if(sym_addr == NULL)
+            if(sym_addr == 0) {
             if(s == NULL) {
                 /* We only allow an undefined symbol if this is a weak
                    reference..   */
@@ -1447,8 +1468,24 @@ static int reloc_library(soinfo *si, Elf_Rel *rel, unsigned count)
                 return -1;
             }
 #endif
+#ifdef WANT_ARM_TRACING
+                switch(ELF32_ST_TYPE(s->st_info))
+                {
+                  case STT_FUNC:
+                  case STT_GNU_IFUNC:
+                  case STT_ARM_TFUNC:
+                    sym_addr = (unsigned)_create_wrapper(sym_name,
+                             (unsigned)(s->st_value + base), WRAPPER_UNHOOKED);
+                    break;
+                  default:
+                        sym_addr = (unsigned)(s->st_value + base);
+                    break;
+                }
+#else
                 sym_addr = (unsigned)(s->st_value + base);
-	    }
+#endif
+            }
+            }
             COUNT_RELOC(RELOC_SYMBOL);
         } else {
             s = NULL;
@@ -2387,5 +2424,8 @@ void android_linker_init(int sdk_version, void *(get_hooked_symbol)(const char*,
 #endif
    (void) sdk_version;
    _get_hooked_symbol = get_hooked_symbol;
+#ifdef WANT_ARM_TRACING
+   _create_wrapper = create_wrapper;
+#endif
   _linker_enable_gdb_support = enable_linker_gdb_support;
 }

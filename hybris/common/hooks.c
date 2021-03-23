@@ -85,6 +85,8 @@ extern int my_property_list(void (*propfn)(const char *key, const char *value, v
 // this is also used in bionic:
 #define bool int
 
+#include "dso_handle_counters.h"
+
 #ifdef WANT_ARM_TRACING
 #include "wrappers.h"
 #endif
@@ -122,6 +124,10 @@ bool (*_android_init_anonymous_namespace)(const char* shared_libs_sonames,
                                       const char* library_search_path) = NULL;
 void (*_android_dlwarning)(void* obj, void (*f)(void*, const char*)) = NULL;
 void *(*_android_get_exported_namespace)(const char* name) = NULL;
+
+#if WANT_LINKER_Q
+void * (*_android_shared_globals)() = NULL;
+#endif
 
 /* TODO:
 *  - Check if the int arguments at attr_set/get match the ones at Android
@@ -257,6 +263,7 @@ static int __android_pthread_cond_pulse(android_cond_t *cond, int counter)
     fret = syscall(SYS_futex , &cond->value,
                    pshared ? FUTEX_WAKE : FUTEX_WAKE_PRIVATE, counter,
                    NULL, NULL, NULL);
+    (void)fret;
     LOGD("futex based pthread_cond_*, value %d, counter %d, ret %d",
                                             cond->value, counter, fret);
     return 0;
@@ -324,9 +331,19 @@ static void *_hybris_hook_malloc(size_t size)
 {
     TRACE_HOOK("size %zu", size);
 
+    void *res = malloc(size);
+
+    TRACE_HOOK("res %p", res);
+
+    return res;
+}
+
 #ifdef WANT_ADRENO_QUIRKS
-    if(size == 4) size = 5;
-#endif
+static void *_hybris_hook_malloc45(size_t size)
+{
+    TRACE_HOOK("size %zu", size);
+
+    if (size == 4) size = 5;
 
     void *res = malloc(size);
 
@@ -334,6 +351,7 @@ static void *_hybris_hook_malloc(size_t size)
 
     return res;
 }
+#endif
 
 static size_t _hybris_hook_malloc_usable_size (void *ptr)
 {
@@ -345,6 +363,10 @@ static size_t _hybris_hook_malloc_usable_size (void *ptr)
 static void *_hybris_hook_memcpy(void *dst, const void *src, size_t len)
 {
     TRACE_HOOK("dst %p src %p len %zu", dst, src, len);
+
+    if (src == dst) {
+        return dst;
+    }
 
     if (src == NULL || dst == NULL)
         return dst;
@@ -1386,7 +1408,7 @@ struct bionic_sbuf {
 typedef off_t bionic_fpos_t;
 
 /* "struct __sFILE" from bionic/libc/include/stdio.h */
-struct __attribute__((packed)) bionic_file {
+struct bionic_file {
     unsigned char *_p;      /* current position in (some) buffer */
     int _r;                 /* read space left for getc() */
     int _w;                 /* write space left for putc() */
@@ -1573,14 +1595,14 @@ FP_ATTRIB static int _hybris_hook_fscanf(FILE *fp, const char *fmt, ...)
 
 static int _hybris_hook_fseek(FILE *fp, long offset, int whence)
 {
-    TRACE_HOOK("fp %p offset %jd whence %d", fp, offset, whence);
+    TRACE_HOOK("fp %p offset %ld whence %d", fp, offset, whence);
 
     return fseek(_get_actual_fp(fp), offset, whence);
 }
 
 static int _hybris_hook_fseeko(FILE *fp, off_t offset, int whence)
 {
-    TRACE_HOOK("fp %p offset %jd whence %d", fp, offset, whence);
+    TRACE_HOOK("fp %p offset %ld whence %d", fp, offset, whence);
 
     return fseeko(_get_actual_fp(fp), offset, whence);
 }
@@ -1592,7 +1614,6 @@ static int _hybris_hook_fsetpos(FILE *fp, const bionic_fpos_t *pos)
     fpos_t my_fpos;
     my_fpos.__pos = *pos;
     memset(&my_fpos.__state, 0, sizeof(mbstate_t));
-    mbsinit(&my_fpos.__state);
 
     return fsetpos(_get_actual_fp(fp), &my_fpos);
 }
@@ -1922,7 +1943,7 @@ static int _hybris_hook_scandirat(int fd, const char *dir,
         *namelist = result;
     }
 
-    return res;
+    return nItems;
 }
 
 static int _hybris_hook_scandir(const char *dir,
@@ -2054,28 +2075,28 @@ static int _hybris_hook___system_property_wait(const void *pi)
 
 static int _hybris_hook___system_property_update(void *pi, const char *value, unsigned int len)
 {
-    TRACE_HOOK("pi %p value '%s' len %d", pi, value, len);
+    TRACE_HOOK("pi %p value '%s' len %u", pi, value, len);
 
     return 0;
 }
 
 static int _hybris_hook___system_property_add(const char *name, unsigned int namelen, const char *value, unsigned int valuelen)
 {
-    TRACE_HOOK("name '%s' namelen %d value '%s' valuelen %d",
+    TRACE_HOOK("name '%s' namelen %u value '%s' valuelen %u",
                name, namelen, value, valuelen);
     return 0;
 }
 
 static unsigned int _hybris_hook___system_property_wait_any(unsigned int serial)
 {
-    TRACE_HOOK("serial %d", serial);
+    TRACE_HOOK("serial %u", serial);
 
     return 0;
 }
 
 static const void *_hybris_hook___system_property_find_nth(unsigned n)
 {
-    TRACE_HOOK("n %d", n);
+    TRACE_HOOK("n %u", n);
 
     return NULL;
 }
@@ -2148,6 +2169,8 @@ int _hybris_hook_clearenv(void)
 
 extern int __cxa_atexit(void (*)(void*), void*, void*);
 extern void __cxa_finalize(void * d);
+extern int __cxa_thread_atexit(void (*dtor)(void *), void *obj,
+                               void *dso_symbol);
 
 struct open_redirect {
     const char *from;
@@ -2222,6 +2245,46 @@ static void *_hybris_hook___get_tls_hooks()
 {
     TRACE_HOOK("");
     return tls_hooks;
+}
+
+struct __wrapped_atexit {
+    void (*dtor)(void *);
+    void *obj;
+    void *dso_handle;
+};
+
+static void __dtor_wrapper(void *obj) {
+    struct __wrapped_atexit *wrapped = obj;
+    /* Call the wrapped dtor. */
+    wrapped->dtor(wrapped->obj);
+    /* Reduce dso_handle's ref count. */
+    __hybris_remove_thread_local_dtor(wrapped->dso_handle);
+    /* Free the wrapper. */
+    free(wrapped);
+}
+
+extern const void * const __dso_handle;
+
+static int _hybris_hook___cxa_thread_atexit(void (*dtor)(void *), void *obj,
+                                            void *dso_symbol)
+{
+    struct __wrapped_atexit *wrapped = malloc(sizeof(struct __wrapped_atexit));
+    wrapped->dtor = dtor;
+    wrapped->obj = obj;
+    wrapped->dso_handle = dso_symbol;
+
+    /* Call Glibc's implementation. Pass our symbol to prevent ourself from
+     * being unloaded. */
+    int ret;
+    if ((ret = __cxa_thread_atexit(__dtor_wrapper, wrapped, &__dso_handle)) != 0) {
+        free(wrapped);
+        return ret;
+    }
+
+    /* Increase refcount of this dso_symbol. */
+    __hybris_add_thread_local_dtor(dso_symbol);
+
+    return ret;
 }
 
 int _hybris_hook_prctl(int option, unsigned long arg2, unsigned long arg3,
@@ -2363,7 +2426,7 @@ static char* _hybris_hook_setlocale(int category, const char *locale)
 static void* _hybris_hook_mmap(void *addr, size_t len, int prot,
                   int flags, int fd, off_t offset)
 {
-    TRACE_HOOK("addr %p len %zu prot %i flags %i fd %i offset %jd",
+    TRACE_HOOK("addr %p len %zu prot %i flags %i fd %i offset %ld",
                addr, len, prot, flags, fd, offset);
 
     return mmap(addr, len, prot, flags, fd, offset);
@@ -2468,6 +2531,66 @@ static wint_t _hybris_hook_getwc(FILE *stream)
     return getwc(_get_actual_fp(stream));
 }
 
+static size_t _hybris_hook___fbufsize(FILE *stream)
+{
+    TRACE_HOOK("__fbufsize");
+    return __fbufsize(_get_actual_fp(stream));
+}
+
+static size_t _hybris_hook___fpending(FILE *stream)
+{
+    TRACE_HOOK("__fpending");
+    return __fpending(_get_actual_fp(stream));
+}
+
+static int _hybris_hook___flbf(FILE *stream)
+{
+    TRACE_HOOK("__flbf");
+    return __flbf(_get_actual_fp(stream));
+}
+
+static int _hybris_hook___freadable(FILE *stream)
+{
+    TRACE_HOOK("__freadable");
+    return __freadable(_get_actual_fp(stream));
+}
+
+static int _hybris_hook___fwritable(FILE *stream)
+{
+    TRACE_HOOK("__fwritable");
+    return __fwritable(_get_actual_fp(stream));
+}
+
+static int _hybris_hook___freading(FILE *stream)
+{
+    TRACE_HOOK("__freading");
+    return __freading(_get_actual_fp(stream));
+}
+
+static int _hybris_hook___fwriting(FILE *stream)
+{
+    TRACE_HOOK("__fwriting");
+    return __fwriting(_get_actual_fp(stream));
+}
+
+static int _hybris_hook___fsetlocking(FILE *stream, int type)
+{
+    TRACE_HOOK("__fsetlocking");
+    return __fsetlocking(_get_actual_fp(stream), type);
+}
+
+static void _hybris_hook__flushlbf(void)
+{
+    TRACE_HOOK("_flushlbf");
+    _flushlbf();
+}
+
+static void _hybris_hook___fpurge(FILE *stream)
+{
+    TRACE_HOOK("__fpurge");
+    __fpurge(_get_actual_fp(stream));
+}
+
 static void *_hybris_hook_dlopen(const char *filename, int flag)
 {
     TRACE("filename %s flag %i", filename, flag);
@@ -2493,7 +2616,7 @@ static void* _hybris_hook_dladdr(void *addr, Dl_info *info)
 {
     TRACE("addr %p info %p", addr, info);
 
-    return _android_dladdr(addr, info);
+    return (void *)_android_dladdr(addr, info);
 }
 
 static int _hybris_hook_dlclose(void *handle)
@@ -2526,7 +2649,7 @@ int _hybris_hook_dl_iterate_phdr(int (*cb)(void* info, size_t size, void* data),
 
 void _hybris_hook_android_get_LD_LIBRARY_PATH(char* buffer, size_t buffer_size)
 {
-    TRACE("buffer %p, buffer_size %zu\n", buffer_size);
+    TRACE("buffer %p, buffer_size %zu\n", buffer, buffer_size);
 
     _android_get_LD_LIBRARY_PATH(buffer, buffer_size);
 }
@@ -2540,16 +2663,16 @@ void _hybris_hook_android_update_LD_LIBRARY_PATH(const char* ld_library_path)
 
 void* _hybris_hook_android_dlopen_ext(const char* filename, int flag, const void* extinfo)
 {
-    TRACE("filename %s, flag %d, extinfo %s", filename, flag, extinfo);
+    TRACE("filename %s, flag %d, extinfo %p", filename, flag, extinfo);
 
     return _android_dlopen_ext(filename, flag, extinfo);
 }
 
 void _hybris_hook_android_set_application_target_sdk_version(uint32_t target)
 {
-    TRACE("target %d", target);
+    TRACE("target %u", target);
 
-    android_set_application_target_sdk_version(target);
+    _android_set_application_target_sdk_version(target);
 }
 
 uint32_t _hybris_hook_android_get_application_target_sdk_version()
@@ -2570,7 +2693,14 @@ void* _hybris_hook_android_create_namespace(const char* name,
 
     return _android_create_namespace(name, ld_library_path, default_library_path, type, permitted_when_isolated_path, parent);
 }
+#if WANT_LINKER_Q
+void* _hybris_hook___loader_shared_globals()
+{
+    TRACE("");
 
+    return _android_shared_globals();
+}
+#endif
 bool _hybris_hook_android_init_anonymous_namespace(const char* shared_libs_sonames,
                                       const char* library_search_path)
 {
@@ -2593,12 +2723,9 @@ void* _hybris_hook_android_get_exported_namespace(const char* name)
     return _android_get_exported_namespace(name);
 }
 
-/* this was added while debugging in the hopes to get a backtrace from a double
- * free crash. Unfortunately it fixes the problem so we cannot get a proper
- * backtrace to fix the underlying problem. */
 void _hybris_hook_free(void *ptr)
 {
-    if (ptr) ((char*)ptr)[0] = 0;
+    TRACE_HOOK("ptr %p", ptr);
     free(ptr);
 }
 
@@ -2858,10 +2985,14 @@ static struct _hook hooks_common[] = {
     HOOK_INDIRECT(android_init_anonymous_namespace),
     HOOK_INDIRECT(android_dlwarning),
     HOOK_INDIRECT(android_get_exported_namespace),
+#if WANT_LINKER_Q
+    HOOK_INDIRECT(__loader_shared_globals),
+#endif
     /* dirent.h */
     HOOK_DIRECT_NO_DEBUG(opendir),
     HOOK_DIRECT_NO_DEBUG(fdopendir),
     HOOK_DIRECT_NO_DEBUG(closedir),
+    HOOK_DIRECT_NO_DEBUG(__fsetlocking),
     HOOK_INDIRECT(readdir),
     HOOK_INDIRECT(readdir_r),
     HOOK_DIRECT_NO_DEBUG(rewinddir),
@@ -2898,10 +3029,23 @@ static struct _hook hooks_common[] = {
     HOOK_DIRECT_NO_DEBUG(access),
     /* grp.h */
     HOOK_DIRECT_NO_DEBUG(getgrgid),
+    /* C++ ABI */
     HOOK_DIRECT_NO_DEBUG(__cxa_atexit),
     HOOK_DIRECT_NO_DEBUG(__cxa_finalize),
+    HOOK_INDIRECT(__cxa_thread_atexit),
     /* sys/prctl.h */
     HOOK_INDIRECT(prctl),
+    /* stdio_ext.h */
+    HOOK_INDIRECT(__fbufsize),
+    HOOK_INDIRECT(__fpending),
+    HOOK_INDIRECT(__flbf),
+    HOOK_INDIRECT(__freadable),
+    HOOK_INDIRECT(__fwritable),
+    HOOK_INDIRECT(__freading),
+    HOOK_INDIRECT(__fwriting),
+    HOOK_INDIRECT(__fsetlocking),
+    HOOK_INDIRECT(_flushlbf),
+    HOOK_INDIRECT(__fpurge),
 };
 
 static struct _hook hooks_mm[] = {
@@ -2929,6 +3073,7 @@ static struct _hook hooks_mm[] = {
     HOOK_DIRECT_NO_DEBUG(ptsname),
     HOOK_TO(__hybris_set_errno_internal, _hybris_hook___set_errno),
     HOOK_DIRECT_NO_DEBUG(getservbyname),
+    HOOK_DIRECT_NO_DEBUG(close), /* avoid calling fdsan functions */
     /* libgen.h */
     HOOK_INDIRECT(basename),
     HOOK_INDIRECT(dirname),
@@ -3022,8 +3167,12 @@ void hybris_set_hook_callback(hybris_hook_cb callback)
 #define LINKER_NAME_MM "mm"
 #define LINKER_NAME_N "n"
 #define LINKER_NAME_O "o"
+#define LINKER_NAME_Q "q"
 
-#if defined(WANT_LINKER_O)
+#if defined(WANT_LINKER_Q)
+#define LINKER_VERSION_DEFAULT 29
+#define LINKER_NAME_DEFAULT LINKER_NAME_Q
+#elif defined(WANT_LINKER_O)
 #define LINKER_VERSION_DEFAULT 27
 #define LINKER_NAME_DEFAULT LINKER_NAME_O
 #elif defined(WANT_LINKER_N)
@@ -3109,6 +3258,12 @@ static void* __hybris_get_hooked_symbol(const char *sym, const char *requester)
             return (void*) found;
     }
 
+#ifdef WANT_ADRENO_QUIRKS
+    if (strstr(requester, "libllvm-glnext.so") != NULL && strcmp(sym, "malloc") == 0) {
+        return _hybris_hook_malloc45;
+    }
+#endif
+
     if (!sorted)
     {
         qsort(hooks_properties, HOOKS_SIZE(hooks_properties), sizeof(hooks_properties[0]), hook_cmp);
@@ -3121,7 +3276,7 @@ static void* __hybris_get_hooked_symbol(const char *sym, const char *requester)
     key.name = sym;
     sdk_version = get_android_sdk_version();
 
-#if defined(WANT_LINKER_MM) || defined(WANT_LINKER_N) || defined(WANT_LINKER_O)
+#if defined(WANT_LINKER_MM) || defined(WANT_LINKER_N) || defined(WANT_LINKER_O) || defined(WANT_LINKER_Q)
     if (sdk_version > 21)
         found = bsearch(&key, hooks_mm, HOOKS_SIZE(hooks_mm), sizeof(hooks_mm[0]), hook_cmp);
 #endif
@@ -3198,6 +3353,10 @@ static void __hybris_linker_init()
     /* See https://source.android.com/source/build-numbers.html for
      * an overview over available SDK version numbers and which
      * Android version they relate to. */
+#if defined(WANT_LINKER_Q)
+    if (sdk_version <= 29)
+        name = LINKER_NAME_Q;
+#endif
 #if defined(WANT_LINKER_O)
     if (sdk_version <= 27)
         name = LINKER_NAME_O;
@@ -3251,7 +3410,9 @@ static void __hybris_linker_init()
     _android_init_anonymous_namespace = dlsym(linker_handle, "android_init_anonymous_namespace");
     _android_dlwarning = dlsym(linker_handle, "android_dlwarning");
     _android_get_exported_namespace = dlsym(linker_handle, "android_get_exported_namespace");
-
+#if WANT_LINKER_Q
+    _android_shared_globals = dlsym(linker_handle, "android_shared_globals");
+#endif
     /* Now its time to setup the linker itself */
 #ifdef WANT_ARM_TRACING
     _android_linker_init(sdk_version, __hybris_get_hooked_symbol, enable_linker_gdb_support, create_wrapper);
