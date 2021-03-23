@@ -5,6 +5,12 @@
 extern "C" {
 #endif
 
+// for usage definitions and so on
+#if HAS_GRALLOC1_HEADER
+#include <hardware/gralloc1.h>
+#endif
+#include <hardware/gralloc.h>
+
 #include <cutils/native_handle.h>
 #include <system/window.h>
 
