@@ -355,6 +355,33 @@ static void ulp_request_phone_context_callback(UlpPhoneContextRequest *req)
 }
 #endif /* HAVE_ULP */
 
+static void request_utc_time_cb() {
+    fprintf(stdout, "request_utc_time_cb\n");
+}
+
+static void set_system_info_cb(const GnssSystemInfo* info) {
+    fprintf(stdout, "set_system_info_cb year: %d\n", info->year_of_hw);
+}
+
+static void gnss_sv_status_cb(GnssSvStatus* sv_info) {
+    int i = 0;
+
+    fprintf(stdout, "*** gnss sv status\n");
+    fprintf(stdout, "sv_size:\t%zu\n", sv_info->size);
+    fprintf(stdout, "num_svs:\t%d\n", sv_info->num_svs);
+    for(i=0; i < sv_info->num_svs; i++)
+    {
+        fprintf(stdout, "\t azimuth:\t%f\n", sv_info->gnss_sv_list[i].azimuth);
+        fprintf(stdout, "\t elevation:\t%f\n", sv_info->gnss_sv_list[i].elevation);
+        /* if prn > 65 and <= 88 this is a glonass sattelite */
+        fprintf(stdout, "\t svid:\t\t%d\n", sv_info->gnss_sv_list[i].svid);
+        fprintf(stdout, "\t c_n0_dbhz:\t%f\n", sv_info->gnss_sv_list[i].c_n0_dbhz);
+        fprintf(stdout, "\t constellation:\t%d\n", sv_info->gnss_sv_list[i].constellation);
+        fprintf(stdout, "\t flags:\t\t%d\n", sv_info->gnss_sv_list[i].flags);
+    }
+
+}
+
 GpsCallbacks callbacks = {
   sizeof(GpsCallbacks),
   location_callback,
@@ -365,6 +392,9 @@ GpsCallbacks callbacks = {
   acquire_wakelock_callback,
   release_wakelock_callback,
   create_thread_callback,
+  request_utc_time_cb,
+  set_system_info_cb,
+  gnss_sv_status_cb,
 };
 
 AGpsCallbacks callbacks2 = {
