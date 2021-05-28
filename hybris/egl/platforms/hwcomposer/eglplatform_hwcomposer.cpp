@@ -17,7 +17,8 @@ extern "C" {
 
 #include <hybris/gralloc/gralloc.h>
 
-static HWComposerNativeWindow *_nativewindow = NULL;
+static HWComposerNativeWindow *_nativewindowPrimary = NULL;
+static HWComposerNativeWindow *_nativewindowExternal = NULL;
 
 extern "C" void hwcomposerws_init_module(struct ws_egl_interface *egl_iface)
 {
@@ -41,22 +42,34 @@ extern "C" void hwcomposerws_Terminate(_EGLDisplay *dpy)
 
 extern "C" EGLNativeWindowType hwcomposerws_CreateWindow(EGLNativeWindowType win, _EGLDisplay *display)
 {
-	assert (_nativewindow == NULL);
-
 	HWComposerNativeWindow *window = static_cast<HWComposerNativeWindow *>((ANativeWindow *) win);
-	_nativewindow = window;
-	_nativewindow->common.incRef(&_nativewindow->common);
-	return (EGLNativeWindowType) static_cast<struct ANativeWindow *>(_nativewindow);
+
+	if (_nativewindowPrimary == NULL) {
+		_nativewindowPrimary = window;
+		_nativewindowPrimary->common.incRef(&_nativewindowPrimary->common);
+		return (EGLNativeWindowType) static_cast<struct ANativeWindow *>(_nativewindowPrimary);
+	} else if (_nativewindowExternal == NULL) {
+		_nativewindowExternal = window;
+		_nativewindowExternal->common.incRef(&_nativewindowExternal->common);
+		return (EGLNativeWindowType) static_cast<struct ANativeWindow *>(_nativewindowExternal);
+	} else {
+		return NULL;
+	}
 }
 
 extern "C" void hwcomposerws_DestroyWindow(EGLNativeWindowType win)
 {
-	assert (_nativewindow != NULL);
-	assert (static_cast<HWComposerNativeWindow *>((struct ANativeWindow *)win) == _nativewindow);
-
-	_nativewindow->common.decRef(&_nativewindow->common);
-	/* We are done with it, refcounting will delete the window when appropriate */
-	_nativewindow = NULL;
+	if (static_cast<HWComposerNativeWindow *>((struct ANativeWindow *)win) == _nativewindowPrimary) {
+		_nativewindowPrimary->common.decRef(&_nativewindowPrimary->common);
+		/* We are done with it, refcounting will delete the window when appropriate */
+		_nativewindowPrimary = NULL;
+	} else if (static_cast<HWComposerNativeWindow *>((struct ANativeWindow *)win) == _nativewindowExternal) {
+		_nativewindowExternal->common.decRef(&_nativewindowExternal->common);
+		/* We are done with it, refcounting will delete the window when appropriate */
+		_nativewindowExternal = NULL;
+	} else {
+		assert(false);
+	}
 }
 
 extern "C" __eglMustCastToProperFunctionPointerType hwcomposerws_eglGetProcAddress(const char *procname) 
