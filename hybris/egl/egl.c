@@ -217,8 +217,8 @@ EGLBoolean eglDestroySurface(EGLDisplay dpy, EGLSurface surface)
 	EGLBoolean result = (*_eglDestroySurface)(dpy, surface);
 
 	/**
-         * If the surface was created via eglCreateWindowSurface, we must
-         * notify the ws about surface destruction for clean-up.
+	 * If the surface was created via eglCreateWindowSurface, we must
+	 * notify the ws about surface destruction for clean-up.
 	 **/
 	if (egl_helper_has_mapping(surface)) {
 	    ws_DestroyWindow(egl_helper_pop_mapping(surface));
